@@ -5,7 +5,7 @@
 %skeleton "lalr1.cc" /* -*- C++ -*- */
 %require "3.0"
 %defines
-%define api.parser.class { SimpleEvaluatorParser }
+%define parser_class_name { SimpleEvaluatorParser }
 
 %define api.token.constructor
 %define api.value.type variant
