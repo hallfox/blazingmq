@@ -47,11 +47,11 @@
 
 #if BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES
 // Include version that can be compiled with C++03
-// Generated on Wed Jun 29 04:09:58 2022
+// Generated on Mon Nov 20 12:40:19 2023
 // Command line: sim_cpp11_features.pl mwcu_objectplaceholder.h
-#define COMPILING_MWCU_OBJECTPLACEHOLDER_H
-#include <mwcu_objectplaceholder_cpp03.h>
-#undef COMPILING_MWCU_OBJECTPLACEHOLDER_H
+# define COMPILING_MWCU_OBJECTPLACEHOLDER_H
+# include <mwcu_objectplaceholder_cpp03.h>
+# undef COMPILING_MWCU_OBJECTPLACEHOLDER_H
 #else
 
 namespace BloombergLP {
@@ -191,7 +191,7 @@ class ObjectPlaceHolder {
 
   public:
     // MANIPULATORS
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 
     /// Initialize this placeholder with an object of the specified `TYPE`
     /// constructed from the specified `args` arguments.  Specify an
@@ -387,7 +387,7 @@ inline ObjectPlaceHolder<SIZE>::~ObjectPlaceHolder()
 }
 
 // MANIPULATORS
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 
 template <size_t SIZE>
 template <class TYPE, class... ARGS>
@@ -470,6 +470,6 @@ ObjectPlaceHolder<SIZE>::objectAddress() const BSLS_KEYWORD_NOEXCEPT
 }  // close package namespace
 }  // close enterprise namespace
 
-#endif  // End C++11 code
+#endif // End C++11 code
 
 #endif

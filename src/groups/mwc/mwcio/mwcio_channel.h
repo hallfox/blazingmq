@@ -33,6 +33,12 @@
 
 #include <mwcio_status.h>
 
+// NTF
+// TODO: Remove after abstracting away TLS upgrades
+#include <ntci_encryptionserver.h>
+#include <ntci_upgradecallback.h>
+#include <ntca_upgradeoptions.h>
+
 // BDE
 #include <bdlbb_blob.h>
 #include <bdlmt_signaler.h>
@@ -139,6 +145,9 @@ class Channel {
     /// Callback that can be passed to `execute`.
     typedef bsl::function<void()> ExecuteCb;
 
+    /// Callback used when passed to `upgrade`.
+    typedef ntci::UpgradeFunction UpgradeCallback;
+
   public:
     // CREATORS
 
@@ -221,6 +230,13 @@ class Channel {
     /// Return a reference providing modifiable access to the properties of
     /// this Channel.
     virtual const mwct::PropertyBag& properties() const = 0;
+
+    /// Upgrade connection to TLS enabled session.
+    virtual void
+    upgrade(const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+            const ntca::UpgradeOptions&                    options,
+            const UpgradeCallback&                         upgradeCallback) = 0;
+
 };
 
 }  // close package namespace

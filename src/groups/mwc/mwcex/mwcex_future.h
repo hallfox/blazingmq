@@ -150,11 +150,11 @@
 
 #if BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES
 // Include version that can be compiled with C++03
-// Generated on Wed Jun 29 04:17:13 2022
+// Generated on Mon Nov 20 12:40:25 2023
 // Command line: sim_cpp11_features.pl mwcex_future.h
-#define COMPILING_MWCEX_FUTURE_H
-#include <mwcex_future_cpp03.h>
-#undef COMPILING_MWCEX_FUTURE_H
+# define COMPILING_MWCEX_FUTURE_H
+# include <mwcex_future_cpp03.h>
+# undef COMPILING_MWCEX_FUTURE_H
 #else
 
 namespace BloombergLP {
@@ -953,7 +953,7 @@ class FutureSharedState {
     /// the C++ standard.
     void setValue(bslmf::MovableRef<R> value);
 
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 
     /// Atomically initialize the stored value as if by direct-non-list-
     /// initializing an object of type `R` with 'bsl::forward<ARGS>(
@@ -1663,7 +1663,7 @@ inline void FutureSharedState<R>::setValue(bslmf::MovableRef<R> value)
     emplaceValue(bslmf::MovableRefUtil::move(value));
 }
 
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 template <class R>
 template <class... ARGS>
 inline void FutureSharedState<R>::emplaceValue(ARGS&&... args)
@@ -1900,6 +1900,6 @@ inline void mwcex::swap(FutureResult<R>& lhs,
 
 }  // close enterprise namespace
 
-#endif  // End C++11 code
+#endif // End C++11 code
 
 #endif

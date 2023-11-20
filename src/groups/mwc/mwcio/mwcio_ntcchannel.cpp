@@ -21,6 +21,7 @@
 #include <mwcu_blob.h>
 
 // NTF
+#include <ntca_upgradeoptions.h>
 #include <ntsf_system.h>
 
 // BDE
@@ -32,6 +33,7 @@
 #include <bdlf_placeholder.h>
 #include <bsl_iomanip.h>
 #include <bsl_iostream.h>
+#include <bsla_unused.h>
 #include <bslma_allocator.h>
 #include <bslma_default.h>
 #include <bslmt_lockguard.h>
@@ -1374,6 +1376,57 @@ void NtcChannel::setWriteQueueHighWatermark(int highWatermark)
     if (d_streamSocket_sp) {
         d_streamSocket_sp->setWriteQueueHighWatermark(highWatermark);
     }
+}
+
+void NtcChannel::processUpgrade(
+    const bsl::shared_ptr<ntci::Upgradable>& upgradable,
+    const ntca::UpgradeEvent&                upgradeEvent)
+{
+    UpgradeCallback upgradeCallback(bsl::allocator_arg, d_allocator_p);
+    {
+        bslmt::LockGuard<bslmt::Mutex> lockGuard(&d_mutex);
+        d_upgradeCallback.swap(upgradeCallback);
+    }
+
+    if (upgradeCallback) {
+        upgradeCallback(upgradable, upgradeEvent);
+    }
+}
+
+void NtcChannel::processDowngradeComplete(
+    BSLA_UNUSED const bsl::shared_ptr<ntci::StreamSocket>& streamSocket,
+    BSLA_UNUSED const ntca::DowngradeEvent& event)
+{
+    d_streamSocket_sp->downgrade();
+
+    bsl::function<void()> downgradeCallback(bsl::allocator_arg, d_allocator_p);
+    {
+        bslmt::LockGuard<bslmt::Mutex> lockGuard(&d_mutex);
+        //d_downgradeCallback.swap(downgradeCallback);
+    }
+
+    if (downgradeCallback) {
+        downgradeCallback();
+    }
+}
+
+void NtcChannel::upgrade(
+    const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+    const ntca::UpgradeOptions&                    options,
+    const UpgradeCallback&                         upgradeCallback)
+{
+    {
+        bslmt::LockGuard<bslmt::Mutex> lockGuard(&d_mutex);
+        d_upgradeCallback = upgradeCallback;
+        // d_downgradeCallback = downgradeCallback;
+    }
+
+    d_streamSocket_sp->upgrade(
+        encryptionServer,
+        options,
+        d_streamSocket_sp->createUpgradeCallback(
+            bdlf::MemFnUtil::memFn(&NtcChannel::processUpgrade, this),
+            d_allocator_p));
 }
 
 // ACCESSORS

@@ -14,11 +14,18 @@
 // limitations under the License.
 
 // mwcio_ntcchannelfactory.t.cpp                                      -*-C++-*-
+#include <bsla_unused.h>
+#include <bslstl_sharedptr.h>
 #include <mwcio_ntcchannelfactory.h>
 
 #include <mwcu_blob.h>
 
+#include <ntca_upgradeevent.h>
+#include <ntca_upgradeoptions.h>
 #include <ntcf_system.h>
+#include <ntci_encryptionserver.h>
+#include <ntci_upgradable.h>
+#include <ntsa_distinguishedname.h>
 #include <ntsf_system.h>
 
 #include <ball_filteringobserver.h>
@@ -88,6 +95,107 @@ static bool ballFilter(const bsl::string&           messageSubstring,
     return !bdlb::StringRefUtil::strstr(record.fixedFields().messageRef(),
                                         messageSubstring)
                 .isEmpty();
+}
+
+namespace {
+
+/// Return an encryption server started with fake TLS certificate configuration
+bsl::shared_ptr<ntci::EncryptionServer>
+makeEncryptionServer(bslma::Allocator* allocator = 0)
+{
+    ntsa::Error error;
+
+    // Create an asynchronous socket interface running two I/O threads.
+
+    ntca::InterfaceConfig interfaceConfig;
+    interfaceConfig.setMetricName("example");
+    interfaceConfig.setMinThreads(2);
+    interfaceConfig.setMaxThreads(2);
+
+    bsl::shared_ptr<ntci::Interface> interface =
+        ntcf::System::createInterface(interfaceConfig, allocator);
+
+    interface->start();
+
+    // Generate the certificates and private keys of the server and the
+    // certificate authority (CA) that issues the server's certificate. In
+    // a production scenario, the CA certificate, server certificate, and
+    // server private key are typically loaded from a secure location on disk.
+
+    bsl::shared_ptr<ntci::EncryptionCertificate> authorityCertificate;
+    bsl::shared_ptr<ntci::EncryptionKey>         authorityPrivateKey;
+
+    bsl::shared_ptr<ntci::EncryptionCertificate> serverCertificate;
+    bsl::shared_ptr<ntci::EncryptionKey>         serverPrivateKey;
+
+    {
+        // Generate the certificate and private key of a trusted authority.
+
+        ntsa::DistinguishedName authorityIdentity;
+        authorityIdentity["CN"] = "Authority";
+        authorityIdentity["O"]  = "Bloomberg LP";
+
+        interface->generateKey(&authorityPrivateKey,
+                               ntca::EncryptionKeyOptions());
+
+        ntca::EncryptionCertificateOptions authorityCertificateOptions;
+        authorityCertificateOptions.setAuthority(true);
+
+        interface->generateCertificate(&authorityCertificate,
+                                       authorityIdentity,
+                                       authorityPrivateKey,
+                                       authorityCertificateOptions);
+
+        // Generate the certificate and private key of the server, signed
+        // by the trusted authority.
+
+        ntsa::DistinguishedName serverIdentity;
+        serverIdentity["CN"] = "Server";
+        serverIdentity["O"]  = "Bloomberg LP";
+
+        interface->generateKey(&serverPrivateKey,
+                               ntca::EncryptionKeyOptions());
+
+        interface->generateCertificate(&serverCertificate,
+                                       serverIdentity,
+                                       serverPrivateKey,
+                                       authorityCertificate,
+                                       authorityPrivateKey,
+                                       ntca::EncryptionCertificateOptions());
+    }
+
+    // Create an encryption server and configure the encryption server to
+    // accept upgrades to TLS 1.1 and higher, to cryptographically identify
+    // itself using the server certificate previously generated, to encrypt
+    // data using the server private key previously generated, and to not
+    // require identification from the client.
+
+    ntca::EncryptionServerOptions encryptionServerOptions;
+    encryptionServerOptions.setMinMethod(ntca::EncryptionMethod::e_TLS_V1_X);
+    encryptionServerOptions.setMaxMethod(ntca::EncryptionMethod::e_TLS_V1_X);
+    encryptionServerOptions.setAuthentication(
+        ntca::EncryptionAuthentication::e_NONE);
+
+    {
+        bsl::vector<char> identityData;
+        serverCertificate->encode(&identityData);
+        encryptionServerOptions.setIdentityData(identityData);
+    }
+
+    {
+        bsl::vector<char> privateKeyData;
+        serverPrivateKey->encode(&privateKeyData);
+        encryptionServerOptions.setPrivateKeyData(privateKeyData);
+    }
+
+    bsl::shared_ptr<ntci::EncryptionServer> encryptionServer;
+    error = interface->createEncryptionServer(&encryptionServer,
+                                              encryptionServerOptions);
+    BSLS_ASSERT_OPT(!error);
+
+    return encryptionServer;
+}
+
 }
 
 // CONSTANTS
@@ -175,6 +283,37 @@ struct Tester_ResultCbInfo {
     }
 };
 
+// ==========================
+// class Tester_UpgradeCbInfo
+// ==========================
+
+/// Arguments used in a call to a ChannelFactory::ResultCallback.
+struct Tester_UpgradeCbInfo {
+    // DATA
+    ntca::UpgradeEvent       d_upgradeEvent;
+    bsl::shared_ptr<Channel> d_channel;
+
+    // TRAITS
+    BSLMF_NESTED_TRAIT_DECLARATION(Tester_UpgradeCbInfo,
+                                   bslma::UsesBslmaAllocator)
+
+    // CREATORS
+    Tester_UpgradeCbInfo(bslma::Allocator* basicAllocator = 0)
+    : d_upgradeEvent(basicAllocator)
+    , d_channel()
+    {
+        // NOTHING
+    }
+
+    Tester_UpgradeCbInfo(const Tester_UpgradeCbInfo& original,
+                         bslma::Allocator*           basicAllocator = 0)
+    : d_upgradeEvent(original.d_upgradeEvent, basicAllocator)
+    , d_channel(original.d_channel)
+    {
+        // NOTHING
+    }
+};
+
 // =======================
 // class Tester_HandleInfo
 // =======================
@@ -185,6 +324,7 @@ struct Tester_HandleInfo {
     bsl::shared_ptr<ChannelFactory::OpHandle> d_handle;
     bsl::deque<Tester_ResultCbInfo>           d_resultCbCalls;
     int                                       d_listenPort;
+    bsl::deque<Tester_UpgradeCbInfo>          d_upgradeCbCalls;
 
     // TRAITS
     BSLMF_NESTED_TRAIT_DECLARATION(Tester_HandleInfo,
@@ -195,6 +335,7 @@ struct Tester_HandleInfo {
     : d_handle()
     , d_resultCbCalls(basicAllocator)
     , d_listenPort(-1)
+    , d_upgradeCbCalls(basicAllocator)
     {
         // NOTHING
     }
@@ -204,6 +345,7 @@ struct Tester_HandleInfo {
     : d_handle(original.d_handle)
     , d_resultCbCalls(original.d_resultCbCalls, basicAllocator)
     , d_listenPort(original.d_listenPort)
+    , d_upgradeCbCalls(original.d_upgradeCbCalls, basicAllocator)
     {
         // NOTHING
     }
@@ -243,6 +385,7 @@ class Tester {
     typedef Tester_ChannelInfo                 ChannelInfo;
     typedef Tester_HandleInfo                  HandleInfo;
     typedef Tester_ResultCbInfo                ResultCbInfo;
+    typedef Tester_UpgradeCbInfo               UpgradeCbInfo;
     typedef bsl::map<bsl::string, ChannelInfo> ChannelMap;
     typedef bsl::map<bsl::string, HandleInfo>  HandleMap;
     typedef bsl::shared_ptr<NtcChannel>        NtcChannelPtr;
@@ -266,6 +409,12 @@ class Tester {
                   ChannelFactoryEvent::Enum       event,
                   const Status&                   status,
                   const bsl::shared_ptr<Channel>& channel);
+
+    /// UpgradeCb passed to `upgrade`
+    void upgradeCb(const bsl::string&                       handleName,
+                   const bsl::shared_ptr<ntci::Upgradable>& upgradable,
+                   const ntca::UpgradeEvent&                upgradeEvent,
+                   const bsl::shared_ptr<Channel>&          channel);
 
     /// `channelPreCreationCb` passed to the NtcChannelFactory, if we're
     /// asked to pass one
@@ -453,6 +602,21 @@ class Tester {
     /// specified `expected`.
     void checkNumPreCreateCbCalls(int line, int expected);
 
+    /// Upgrade the channel
+    void upgradeChannel(
+        int                                            line,
+        const bslstl::StringRef&                       channelName,
+        const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer);
+
+    /// Check the oldest unchecked call to the UpgradeCallback associated
+    /// with the handle with the specified `handleName`, and verify that
+    /// it's a successful `e_COMPLETE` event, and assign the channel the
+    /// specified `channelName`.  This function will wait for up to 5s for
+    /// the call to be received before failing the check.
+    void checkUpgradeCallback(int                      line,
+                              const bslstl::StringRef& handleName,
+                              const bslstl::StringRef& channelName);
+
     /// Return a reference providing modifiable access to the object being
     /// tested.
     NtcChannelFactory& object();
@@ -476,6 +640,21 @@ void Tester::resultCb(const bsl::string&              handleName,
     cbInfo.d_event       = event;
     cbInfo.d_status      = status;
     cbInfo.d_channel     = channel;
+}
+
+void Tester::upgradeCb(
+    const bsl::string& handleName,
+    BSLA_UNUSED const bsl::shared_ptr<ntci::Upgradable>& upgradable,
+    const ntca::UpgradeEvent&                            upgradeEvent,
+    const bsl::shared_ptr<Channel>&                      channel)
+{
+    bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
+    HandleInfo&                    info = d_handleMap[handleName];
+
+    info.d_upgradeCbCalls.emplace_back();
+    UpgradeCbInfo& cbInfo = info.d_upgradeCbCalls.back();
+    cbInfo.d_upgradeEvent = upgradeEvent;
+    cbInfo.d_channel      = channel;
 }
 
 void Tester::preCreationCb(
@@ -900,6 +1079,29 @@ void Tester::checkResultCallback(int                       line,
     info.d_resultCbCalls.pop_front();
 }
 
+void Tester::upgradeChannel(
+    int                                            line,
+    const bslstl::StringRef&                       channelName,
+    const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer)
+{
+    using namespace bdlf::PlaceHolders;
+    bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
+
+    bslmt::Semaphore serverUpgraded;
+    bslmt::Semaphore serverDowngraded;
+    ChannelInfo&     channelInfo = d_channelMap[channelName];
+    channelInfo.d_channel->upgrade(
+        encryptionServer,
+        ntca::UpgradeOptions(),
+        bdlf::BindUtil::bindS(d_allocator_p,
+                              &Tester::upgradeCb,
+                              this,
+                              channelName,
+                              _1,
+                              _2,
+                              channelInfo.d_channel));
+}
+
 void Tester::checkResultCallback(int                      line,
                                  const bslstl::StringRef& handleName,
                                  const bslstl::StringRef& channelName)
@@ -1027,6 +1229,33 @@ void Tester::checkNumPreCreateCbCalls(int line, int expected)
     ASSERT_EQ_D(line, static_cast<int>(d_preCreateCbCalls.size()), expected);
 }
 
+void Tester::checkUpgradeCallback(int                       line,
+                                 const bslstl::StringRef&  handleName,
+                                 const bslstl::StringRef&  channelName)
+{
+    bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
+
+    bsls::Types::Int64 startTime = bsls::TimeUtil::getTimer();
+
+    HandleInfo& info = d_handleMap[handleName];
+
+    while (info.d_upgradeCbCalls.empty() &&
+           (bsls::TimeUtil::getTimer() - startTime) <
+               5 * bdlt::TimeUnitRatio::k_NS_PER_S) {
+        bslmt::LockGuardUnlock<bslmt::Mutex> unlockGuard(&d_mutex);
+        bslmt::ThreadUtil::microSleep(1000);
+    }
+
+    if (info.d_upgradeCbCalls.empty()) {
+        ASSERT_D(line, false);
+        return;  // RETURN
+    }
+
+    UpgradeCbInfo& cbInfo = info.d_upgradeCbCalls.front();
+    ASSERT_D(line, cbInfo.d_upgradeEvent.isComplete());
+    info.d_upgradeCbCalls.pop_front();
+}
+
 NtcChannelFactory& Tester::object()
 {
     return *d_object;
@@ -1035,6 +1264,43 @@ NtcChannelFactory& Tester::object()
 // ============================================================================
 //                                    TESTS
 // ----------------------------------------------------------------------------
+static void test7_upgradeChannelTest()
+// ------------------------------------------------------------------------
+// PRE CREATION CB TEST
+//
+// Concerns:
+//  a) 'upgradeChannelCb' is called for every channel upgraded
+// ------------------------------------------------------------------------
+{
+    mwctst::TestHelper::printTestName("Upgrade Channel Cb Test");
+
+    Tester                                  t(s_allocator_p);
+    bsl::shared_ptr<ntci::EncryptionServer> encryptionServer =
+        makeEncryptionServer(s_allocator_p);
+
+    // Concern 'a'
+    t.init(L_);
+
+    // Create 4 channel
+    t.listen(L_, "listenHandle", "127.0.0.1:0");
+    t.connect(L_, "connectHandle", "listenHandle");
+
+    t.checkResultCallback(L_, "listenHandle", "listenChannel1");
+    t.checkResultCallback(L_, "connectHandle", "connectChannel1");
+
+    t.upgradeChannel(L_, "listenHandle", encryptionServer);
+
+    t.checkUpgradeCallback(L_, "listenHandle", "listenChannel1");
+
+    // Make a second channel
+    t.connect(L_, "connect2Handle", "listenHandle");
+
+    t.checkResultCallback(L_, "connect2Handle", "connectChannel2");
+    t.checkResultCallback(L_, "listenHandle", "listenChannel2");
+
+    t.checkNumPreCreateCbCalls(L_, 4);
+}
+
 static void test6_preCreationCbTest()
 // ------------------------------------------------------------------------
 // PRE CREATION CB TEST
@@ -1327,6 +1593,7 @@ int main(int argc, char* argv[])
     case 4: test4_cancelHandleTest(); break;
     case 5: test5_visitChannelsTest(); break;
     case 6: test6_preCreationCbTest(); break;
+    case 7: test7_upgradeChannelTest(); break;
     default: {
         cerr << "WARNING: CASE '" << _testCase << "' NOT FOUND." << endl;
         s_testStatus = -1;

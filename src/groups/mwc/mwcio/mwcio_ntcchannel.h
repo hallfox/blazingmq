@@ -36,6 +36,7 @@
 #include <mwct_propertybag.h>
 
 // NTC
+#include <ntca_upgradeoptions.h>
 #include <ntcf_system.h>
 
 // BDE
@@ -52,6 +53,7 @@
 #include <bsls_keyword.h>
 #include <bsls_timeinterval.h>
 #include <bsls_types.h>
+#include <ntci_upgradecallback.h>
 
 namespace BloombergLP {
 namespace mwcio {
@@ -214,7 +216,9 @@ class NtcChannel : public mwcio::Channel,
     bdlmt::Signaler<WatermarkFnType>      d_watermarkSignaler;
     bdlmt::Signaler<CloseFnType>          d_closeSignaler;
     mwcio::ChannelFactory::ResultCallback d_resultCallback;
-    bslma::Allocator*                     d_allocator_p;
+    UpgradeCallback                       d_upgradeCallback;
+    // DowngradeCallback                     d_downgradeCallback;
+    bslma::Allocator* d_allocator_p;
 
   private:
     // NOT IMPLEMENTED
@@ -286,6 +290,16 @@ class NtcChannel : public mwcio::Channel,
 
     /// Process the closure of the socket.
     void processClose(const mwcio::Status& status);
+
+    /// @brief Process the upgrade of this socket to TLS
+    void processUpgrade(const bsl::shared_ptr<ntci::Upgradable>& upgradable,
+                        const ntca::UpgradeEvent&                upgradeEvent);
+
+    /// @brief Process the completion of a downgrade from encrypted to
+    /// unencrypted communication.
+    void processDowngradeComplete(
+        const bsl::shared_ptr<ntci::StreamSocket>& streamSocket,
+        const ntca::DowngradeEvent& event) BSLS_KEYWORD_OVERRIDE;
 
   public:
     // TRAITS
@@ -407,6 +421,17 @@ class NtcChannel : public mwcio::Channel,
 
     /// Set the write queue high watermark to the specified `highWatermark`.
     void setWriteQueueHighWatermark(int highWatermark);
+
+    /// @brief Assume the TLS server role and begin upgrading the socket from
+    /// being unencrypted to being encrypted with TLS.
+    ///
+    /// Invoke the specified `upgradeCallback` when the socket has completed
+    /// upgrading to TLS, and invoke the specified `downgradeCallback` when the
+    /// socket has completed downgrading from TLS back to clear text.
+    void
+    upgrade(const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+            const ntca::UpgradeOptions&                    options,
+            const UpgradeCallback& upgradeCallback) BSLS_KEYWORD_OVERRIDE;
 
     // ACCESSORS
 

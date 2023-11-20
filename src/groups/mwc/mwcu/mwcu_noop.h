@@ -36,11 +36,11 @@
 
 #if BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES
 // Include version that can be compiled with C++03
-// Generated on Wed Jun 29 04:03:13 2022
+// Generated on Mon Nov 20 12:40:19 2023
 // Command line: sim_cpp11_features.pl mwcu_noop.h
-#define COMPILING_MWCU_NOOP_H
-#include <mwcu_noop_cpp03.h>
-#undef COMPILING_MWCU_NOOP_H
+# define COMPILING_MWCU_NOOP_H
+# include <mwcu_noop_cpp03.h>
+# undef COMPILING_MWCU_NOOP_H
 #else
 
 namespace BloombergLP {
@@ -60,7 +60,7 @@ class NoOp {
 
   public:
     // ACCESSORS
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 
     /// Do nothing.
     template <class... ARGS>
@@ -82,7 +82,7 @@ class NoOp {
 // ----------
 
 // ACCESSORS
-#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES  // $var-args=9
+#if !BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES // $var-args=9
 template <class... ARGS>
 inline void NoOp::operator()(const ARGS&...) const BSLS_KEYWORD_NOEXCEPT
 {
@@ -93,6 +93,6 @@ inline void NoOp::operator()(const ARGS&...) const BSLS_KEYWORD_NOEXCEPT
 }  // close package namespace
 }  // close enterprise namespace
 
-#endif  // End C++11 code
+#endif // End C++11 code
 
 #endif

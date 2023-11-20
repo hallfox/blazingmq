@@ -104,6 +104,12 @@ class DecoratingChannelPartialImp : public Channel {
 
     /// Forward to the underlying base `Channel`.
     const mwct::PropertyBag& properties() const BSLS_KEYWORD_OVERRIDE;
+
+    /// Upgrade connection to TLS enabled session.
+    void
+    upgrade(const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+            const ntca::UpgradeOptions&                    options,
+            const UpgradeCallback& upgradeCallback) BSLS_KEYWORD_OVERRIDE;
 };
 
 // ============================================================================
@@ -173,6 +179,14 @@ inline const bsl::string& DecoratingChannelPartialImp::peerUri() const
 inline const mwct::PropertyBag& DecoratingChannelPartialImp::properties() const
 {
     return d_base->properties();
+}
+
+inline void DecoratingChannelPartialImp::upgrade(
+    const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+    const ntca::UpgradeOptions&                    options,
+    const UpgradeCallback&                         upgradeCallback)
+{
+    return d_base->upgrade(encryptionServer, options, upgradeCallback);
 }
 
 }  // close package namespace

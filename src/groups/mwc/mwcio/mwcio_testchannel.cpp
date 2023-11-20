@@ -282,6 +282,14 @@ TestChannel::WatermarkSignaler& TestChannel::watermarkSignaler()
     return d_watermarkSignaler;
 }
 
+void TestChannel::upgrade(
+    const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+    const ntca::UpgradeOptions&                    options,
+    const UpgradeCallback&                         upgradeCallback)
+{
+    // Stub
+}
+
 // ACCESSORS
 const Status& TestChannel::writeStatus() const
 {

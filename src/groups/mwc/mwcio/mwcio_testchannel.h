@@ -277,6 +277,10 @@ class TestChannel : public Channel {
     bdlmt::SignalerConnection
     onWatermark(const WatermarkFn& cb) BSLS_KEYWORD_OVERRIDE;
     mwct::PropertyBag& properties() BSLS_KEYWORD_OVERRIDE;
+    void
+    upgrade(const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer,
+            const ntca::UpgradeOptions&                    options,
+            const UpgradeCallback& upgradeCallback) BSLS_KEYWORD_OVERRIDE;
 
     // ACCESSORS
     // Channel
