@@ -22,8 +22,11 @@
 
 #include <ntca_upgradeevent.h>
 #include <ntca_upgradeoptions.h>
+#include <ntcd_encryption.h>
 #include <ntcf_system.h>
+#include <ntci_encryptiondriver.h>
 #include <ntci_encryptionserver.h>
+#include <ntci_interface.h>
 #include <ntci_upgradable.h>
 #include <ntsa_distinguishedname.h>
 #include <ntsf_system.h>
@@ -101,21 +104,10 @@ namespace {
 
 /// Return an encryption server started with fake TLS certificate configuration
 bsl::shared_ptr<ntci::EncryptionServer>
-makeEncryptionServer(bslma::Allocator* allocator = 0)
+makeEncryptionServer(ntci::Interface*  interface,
+                     bslma::Allocator* allocator = 0)
 {
     ntsa::Error error;
-
-    // Create an asynchronous socket interface running two I/O threads.
-
-    ntca::InterfaceConfig interfaceConfig;
-    interfaceConfig.setMetricName("example");
-    interfaceConfig.setMinThreads(2);
-    interfaceConfig.setMaxThreads(2);
-
-    bsl::shared_ptr<ntci::Interface> interface =
-        ntcf::System::createInterface(interfaceConfig, allocator);
-
-    interface->start();
 
     // Generate the certificates and private keys of the server and the
     // certificate authority (CA) that issues the server's certificate. In
@@ -131,37 +123,46 @@ makeEncryptionServer(bslma::Allocator* allocator = 0)
     {
         // Generate the certificate and private key of a trusted authority.
 
-        ntsa::DistinguishedName authorityIdentity;
+        ntsa::DistinguishedName authorityIdentity(allocator);
         authorityIdentity["CN"] = "Authority";
         authorityIdentity["O"]  = "Bloomberg LP";
 
-        interface->generateKey(&authorityPrivateKey,
-                               ntca::EncryptionKeyOptions());
+        error = interface->generateKey(&authorityPrivateKey,
+                                       ntca::EncryptionKeyOptions(),
+                                       allocator);
+        ASSERT(!error);
 
         ntca::EncryptionCertificateOptions authorityCertificateOptions;
         authorityCertificateOptions.setAuthority(true);
 
-        interface->generateCertificate(&authorityCertificate,
-                                       authorityIdentity,
-                                       authorityPrivateKey,
-                                       authorityCertificateOptions);
+        error = interface->generateCertificate(&authorityCertificate,
+                                               authorityIdentity,
+                                               authorityPrivateKey,
+                                               authorityCertificateOptions,
+                                               allocator);
+        ASSERT(!error);
 
         // Generate the certificate and private key of the server, signed
         // by the trusted authority.
 
-        ntsa::DistinguishedName serverIdentity;
+        ntsa::DistinguishedName serverIdentity(allocator);
         serverIdentity["CN"] = "Server";
         serverIdentity["O"]  = "Bloomberg LP";
 
-        interface->generateKey(&serverPrivateKey,
-                               ntca::EncryptionKeyOptions());
+        error = interface->generateKey(&serverPrivateKey,
+                                       ntca::EncryptionKeyOptions(),
+                                       allocator);
+        ASSERT(!error);
 
-        interface->generateCertificate(&serverCertificate,
-                                       serverIdentity,
-                                       serverPrivateKey,
-                                       authorityCertificate,
-                                       authorityPrivateKey,
-                                       ntca::EncryptionCertificateOptions());
+        error = interface->generateCertificate(
+            &serverCertificate,
+            serverIdentity,
+            serverPrivateKey,
+            authorityCertificate,
+            authorityPrivateKey,
+            ntca::EncryptionCertificateOptions(),
+            allocator);
+        ASSERT(!error);
     }
 
     // Create an encryption server and configure the encryption server to
@@ -177,20 +178,21 @@ makeEncryptionServer(bslma::Allocator* allocator = 0)
         ntca::EncryptionAuthentication::e_NONE);
 
     {
-        bsl::vector<char> identityData;
+        bsl::vector<char> identityData(allocator);
         serverCertificate->encode(&identityData);
         encryptionServerOptions.setIdentityData(identityData);
     }
 
     {
-        bsl::vector<char> privateKeyData;
+        bsl::vector<char> privateKeyData(allocator);
         serverPrivateKey->encode(&privateKeyData);
         encryptionServerOptions.setPrivateKeyData(privateKeyData);
     }
 
     bsl::shared_ptr<ntci::EncryptionServer> encryptionServer;
     error = interface->createEncryptionServer(&encryptionServer,
-                                              encryptionServerOptions);
+                                              encryptionServerOptions,
+                                              allocator);
     BSLS_ASSERT_OPT(!error);
 
     return encryptionServer;
@@ -392,15 +394,18 @@ class Tester {
     typedef bsl::deque<NtcChannelPtr>          PreCreateCbCallList;
 
     // DATA
-    bslma::Allocator*                    d_allocator_p;
-    bdlbb::PooledBlobBufferFactory       d_blobBufferFactory;
-    bsl::shared_ptr<ball::TestObserver>  d_ballObserver;
-    ChannelMap                           d_channelMap;
-    HandleMap                            d_handleMap;
-    PreCreateCbCallList                  d_preCreateCbCalls;
-    bool                                 d_setPreCreateCb;
-    bslma::ManagedPtr<NtcChannelFactory> d_object;
-    bslmt::Mutex                         d_mutex;
+    bslma::Allocator*                       d_allocator_p;
+    bdlbb::PooledBlobBufferFactory          d_blobBufferFactory;
+    bsl::shared_ptr<ball::TestObserver>     d_ballObserver;
+    ChannelMap                              d_channelMap;
+    HandleMap                               d_handleMap;
+    PreCreateCbCallList                     d_preCreateCbCalls;
+    bool                                    d_setPreCreateCb;
+    bool                                    d_setTls;
+    bsl::shared_ptr<ntci::EncryptionServer> d_encryptionServer;
+    bslma::ManagedPtr<NtcChannelFactory>    d_object;
+    bslmt::Mutex                            d_mutex;
+    bsl::shared_ptr<ntci::Interface>        d_interface;
 
     // PRIVATE MANIPULATORS
 
@@ -460,6 +465,11 @@ class Tester {
     /// the next time `init` is called to the specified `value`.  By default
     /// this is `false`.
     void setPreCreateCb(bool value);
+
+    /// Set whether the socket will use TLS on the `NtcChannelFactory`
+    /// the next time `init` is called to the specified `value`.  By default
+    /// this is `false`.
+    void setTls(bool value);
 
     /// (Re-)create the object being tested and reset the state of any
     /// supporting objects.
@@ -603,10 +613,7 @@ class Tester {
     void checkNumPreCreateCbCalls(int line, int expected);
 
     /// Upgrade the channel
-    void upgradeChannel(
-        int                                            line,
-        const bslstl::StringRef&                       channelName,
-        const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer);
+    void upgradeChannel(int line, const bslstl::StringRef& channelName);
 
     /// Check the oldest unchecked call to the UpgradeCallback associated
     /// with the handle with the specified `handleName`, and verify that
@@ -732,6 +739,8 @@ Tester::Tester(bslma::Allocator* basicAllocator)
 , d_handleMap(basicAllocator)
 , d_preCreateCbCalls(basicAllocator)
 , d_setPreCreateCb(false)
+, d_setTls(false)
+, d_encryptionServer()
 , d_object()
 , d_mutex()
 {
@@ -748,6 +757,11 @@ void Tester::setPreCreateCb(bool value)
     d_setPreCreateCb = value;
 }
 
+void Tester::setTls(bool value)
+{
+    d_setTls = value;
+}
+
 void Tester::init(int line)
 {
     destroy();
@@ -755,9 +769,17 @@ void Tester::init(int line)
     ntca::InterfaceConfig interfaceConfig;
     interfaceConfig.setThreadName("test");
 
-    d_object.load(new (*d_allocator_p) NtcChannelFactory(interfaceConfig,
-                                                         &d_blobBufferFactory,
-                                                         d_allocator_p),
+    bsl::shared_ptr<bdlbb::BlobBufferFactory> blobBufferFactory_sp(
+        &d_blobBufferFactory,
+        bslstl::SharedPtrNilDeleter(),
+        d_allocator_p);
+
+    d_interface = ntcf::System::createInterface(interfaceConfig,
+                                                blobBufferFactory_sp,
+                                                d_allocator_p);
+
+    d_object.load(new (*d_allocator_p)
+                      NtcChannelFactory(d_interface, d_allocator_p),
                   d_allocator_p);
 
     if (d_setPreCreateCb) {
@@ -769,6 +791,17 @@ void Tester::init(int line)
 
     int ret = d_object->start();
     ASSERT_EQ_D(line, ret, 0);
+
+    if (d_setTls) {
+        bsl::shared_ptr<ntci::EncryptionDriver> encryptionDriver;
+        // WHYHYY
+        encryptionDriver.load(new (*d_allocator_p)
+                                  ntcd::EncryptionDriver(d_allocator_p),
+                              d_allocator_p);
+        ntcf::System::registerEncryptionDriver(encryptionDriver());
+        d_encryptionServer = makeEncryptionServer(d_interface.get(),
+                                                  d_allocator_p);
+    }
 }
 
 void Tester::listen(int                      line,
@@ -1079,10 +1112,7 @@ void Tester::checkResultCallback(int                       line,
     info.d_resultCbCalls.pop_front();
 }
 
-void Tester::upgradeChannel(
-    int                                            line,
-    const bslstl::StringRef&                       channelName,
-    const bsl::shared_ptr<ntci::EncryptionServer>& encryptionServer)
+void Tester::upgradeChannel(int line, const bslstl::StringRef& channelName)
 {
     using namespace bdlf::PlaceHolders;
     bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
@@ -1091,7 +1121,7 @@ void Tester::upgradeChannel(
     bslmt::Semaphore serverDowngraded;
     ChannelInfo&     channelInfo = d_channelMap[channelName];
     channelInfo.d_channel->upgrade(
-        encryptionServer,
+        d_encryptionServer,
         ntca::UpgradeOptions(),
         bdlf::BindUtil::bindS(d_allocator_p,
                               &Tester::upgradeCb,
@@ -1229,9 +1259,9 @@ void Tester::checkNumPreCreateCbCalls(int line, int expected)
     ASSERT_EQ_D(line, static_cast<int>(d_preCreateCbCalls.size()), expected);
 }
 
-void Tester::checkUpgradeCallback(int                       line,
-                                 const bslstl::StringRef&  handleName,
-                                 const bslstl::StringRef&  channelName)
+void Tester::checkUpgradeCallback(int                      line,
+                                  const bslstl::StringRef& handleName,
+                                  const bslstl::StringRef& channelName)
 {
     bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
 
@@ -1274,9 +1304,8 @@ static void test7_upgradeChannelTest()
 {
     mwctst::TestHelper::printTestName("Upgrade Channel Cb Test");
 
-    Tester                                  t(s_allocator_p);
-    bsl::shared_ptr<ntci::EncryptionServer> encryptionServer =
-        makeEncryptionServer(s_allocator_p);
+    Tester t(s_allocator_p);
+    t.setTls(true);
 
     // Concern 'a'
     t.init(L_);
@@ -1288,7 +1317,7 @@ static void test7_upgradeChannelTest()
     t.checkResultCallback(L_, "listenHandle", "listenChannel1");
     t.checkResultCallback(L_, "connectHandle", "connectChannel1");
 
-    t.upgradeChannel(L_, "listenHandle", encryptionServer);
+    t.upgradeChannel(L_, "listenHandle");
 
     t.checkUpgradeCallback(L_, "listenHandle", "listenChannel1");
 
