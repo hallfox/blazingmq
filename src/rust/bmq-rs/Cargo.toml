@@ -1,0 +1,17 @@
+[package]
+name = "bmq-rs"
+authors = ["Taylor Foxhall <lxmachina@gmail.com>"]
+description = "A client API for BlazingMQ based on libbmq bindings"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+cxx = "1.0"
+thiserror = "1.0"
+
+[build-dependencies]
+cxx-build = "1.0"
+pkg-config = "0.3"
