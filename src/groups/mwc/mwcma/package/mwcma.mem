@@ -1,3 +1,4 @@
 mwcma_countingallocator
 mwcma_countingallocatorstore
 mwcma_countingallocatorutil
+mwcma_poisonallocator
